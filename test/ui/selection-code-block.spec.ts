@@ -7,7 +7,7 @@ const baseTurndownOptions: TurndownOptions = {
   bulletListMarker: '-',
 };
 
-const chatgptExpectedCode = [
+const wrappedCodeBlockExpectedCode = [
   'class Example {',
   '  #privateField = 42;',
   '',
@@ -29,7 +29,7 @@ const chatgptExpectedCode = [
   'e.#privateMethod();           // SyntaxError',
 ].join('\n');
 
-const chatgptOneLinerExpectedCode = 'class Object; def method_missing(*) = self end end; p "ok".nope.this.is.fine.upcase';
+const wrappedOneLinerExpectedCode = 'class Object; def method_missing(*) = self end end; p "ok".nope.this.is.fine.upcase';
 
 async function convertSelectionToMarkdown(
   html: string,
@@ -59,32 +59,60 @@ async function convertSelectionToMarkdown(
 }
 
 describe('selectionToMarkdown code block handling', () => {
+  it('converts nested pre content to fenced markdown text', async () => {
+    const html = await fetch('/test/fixtures/nested-pre-code-block.html').then(r => r.text());
+    const md = await convertSelectionToMarkdown(html, { codeBlockStyle: 'fenced' });
+
+    expect(md).toBe(
+      'Here is a short example with text before and after it.\n\n'
+      + '```\n'
+      + 'x = 10\n\n# test\ny = 20\nprint(x + y)\n'
+      + '```\n\n'
+      + 'And here is some text after the code snippet',
+    );
+  });
+
+  it('converts nested pre content to indented markdown text', async () => {
+    const html = await fetch('/test/fixtures/nested-pre-code-block.html').then(r => r.text());
+    const md = await convertSelectionToMarkdown(html, { codeBlockStyle: 'indented' });
+
+    expect(md).toBe(
+      'Here is a short example with text before and after it.\n\n'
+      + '    x = 10\n'
+      + '    \n'
+      + '    # test\n'
+      + '    y = 20\n'
+      + '    print(x + y)\n\n'
+      + 'And here is some text after the code snippet',
+    );
+  });
+
   it('converts ChatGPT wrapped one-liner code block to full fenced markdown text', async () => {
     const html = await fetch('/test/fixtures/chatgpt-code-block-one-liner.html').then(r => r.text());
     const md = await convertSelectionToMarkdown(html, { codeBlockStyle: 'fenced' });
 
-    expect(md).toBe(`\`\`\`ruby\n${chatgptOneLinerExpectedCode}\n\`\`\``);
+    expect(md).toBe(`\`\`\`ruby\n${wrappedOneLinerExpectedCode}\n\`\`\``);
   });
 
   it('converts ChatGPT wrapped one-liner code block to full indented markdown text', async () => {
     const html = await fetch('/test/fixtures/chatgpt-code-block-one-liner.html').then(r => r.text());
     const md = await convertSelectionToMarkdown(html, { codeBlockStyle: 'indented' });
 
-    expect(md).toBe(`    ${chatgptOneLinerExpectedCode}`);
+    expect(md).toBe(`    ${wrappedOneLinerExpectedCode}`);
   });
 
   it('converts ChatGPT wrapped code block to full fenced markdown text', async () => {
     const html = await fetch('/test/fixtures/chatgpt-code-block.html').then(r => r.text());
     const md = await convertSelectionToMarkdown(html, { codeBlockStyle: 'fenced' });
 
-    expect(md).toBe(`\`\`\`js\n${chatgptExpectedCode}\n\`\`\``);
+    expect(md).toBe(`\`\`\`js\n${wrappedCodeBlockExpectedCode}\n\`\`\``);
   });
 
   it('converts ChatGPT wrapped code block to full indented markdown text', async () => {
     const html = await fetch('/test/fixtures/chatgpt-code-block.html').then(r => r.text());
     const md = await convertSelectionToMarkdown(html, { codeBlockStyle: 'indented' });
 
-    expect(md).toBe(`    ${chatgptExpectedCode.replace(/\n/g, '\n    ')}`);
+    expect(md).toBe(`    ${wrappedCodeBlockExpectedCode.replace(/\n/g, '\n    ')}`);
   });
 
   it('keeps canonical pre>code conversion for fenced style', async () => {

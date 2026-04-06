@@ -12,6 +12,148 @@ export async function selectionToMarkdown(
   gfmJsURL: string,
   turndownOptions: TurndownOptions,
 ): Promise<Promise<string>> {
+  type NormalizedCodeBlock = {
+    className?: string,
+    codeText: string,
+  };
+
+  function extractTextWithLineBreaks(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || '';
+      if (/^\s+$/.test(text) && text.includes('\n')) {
+        return '';
+      }
+      return text;
+    }
+
+    if (node.nodeName === 'BR') {
+      return '\n';
+    }
+
+    let text = '';
+    node.childNodes.forEach((child) => {
+      text += extractTextWithLineBreaks(child);
+    });
+    return text;
+  }
+
+  function extractCodeText(codeContainer: Element): string {
+    if (codeContainer.querySelector('br')) {
+      return extractTextWithLineBreaks(codeContainer);
+    }
+
+    if (codeContainer instanceof HTMLElement) {
+      const renderedText = codeContainer.innerText;
+      if (renderedText) {
+        return renderedText;
+      }
+    }
+
+    return extractTextWithLineBreaks(codeContainer);
+  }
+
+  function isMultilineText(text: string): boolean {
+    return text.includes('\n');
+  }
+
+  function normalizeCodeText(text: string): string {
+    return text.replace(/\u00A0/g, ' ');
+  }
+
+  function getMeaningfulMultilineText(text: string): string | null {
+    const normalizedText = normalizeCodeText(text);
+    if (!isMultilineText(normalizedText) || !/\S/.test(normalizedText)) {
+      return null;
+    }
+
+    return normalizedText;
+  }
+
+  function getElementDepth(element: Element, ancestor: Element): number {
+    let depth = 0;
+    let current: Element | null = element;
+    while (current && current !== ancestor) {
+      depth += 1;
+      current = current.parentElement;
+    }
+    return depth;
+  }
+
+  function findNestedCodeBlock(pre: HTMLPreElement): NormalizedCodeBlock | null {
+    const interactiveSelector = 'button, [role="button"], input, select, textarea';
+    const candidates = Array.from(pre.querySelectorAll('*'))
+      .map((element) => {
+        if (element.nodeName === 'BR') {
+          return null;
+        }
+
+        if (element.matches(interactiveSelector) || element.querySelector(interactiveSelector)) {
+          return null;
+        }
+
+        const codeText = getMeaningfulMultilineText(extractCodeText(element));
+        if (!codeText) {
+          return null;
+        }
+
+        return { codeText, element };
+      })
+      .filter(candidate => candidate !== null)
+      .sort((a, b) => getElementDepth(b.element, pre) - getElementDepth(a.element, pre));
+
+    const match = candidates[0];
+    if (!match) {
+      return null;
+    }
+
+    return { codeText: match.codeText };
+  }
+
+  function findWrappedCodeBlock(pre: HTMLPreElement): NormalizedCodeBlock | null {
+    const codeNodes = pre.querySelectorAll('code');
+    if (codeNodes.length !== 1) {
+      return null;
+    }
+
+    const codeNode = codeNodes[0]!;
+    const className = codeNode.getAttribute('class') || '';
+    const hasLanguageClass = /\blanguage-\S+\b/.test(className);
+    const codeText = codeNode.textContent || '';
+
+    // Conservative matcher: avoid rewriting instructional <pre> content.
+    if (!hasLanguageClass && !isMultilineText(codeText)) {
+      return null;
+    }
+
+    return { className, codeText };
+  }
+
+  function createNormalizedCodeElement(codeBlock: NormalizedCodeBlock): HTMLElement {
+    const normalizedCode = document.createElement('code');
+    if (codeBlock.className) {
+      normalizedCode.setAttribute('class', codeBlock.className);
+    }
+    normalizedCode.textContent = codeBlock.codeText;
+    return normalizedCode;
+  }
+
+  function getNormalizedCodeBlock(pre: HTMLPreElement): NormalizedCodeBlock | null {
+    if (pre.firstElementChild?.nodeName === 'CODE') {
+      return null;
+    }
+
+    const wrappedCodeBlock = findWrappedCodeBlock(pre);
+    if (wrappedCodeBlock) {
+      return wrappedCodeBlock;
+    }
+
+    if (pre.querySelector('code')) {
+      return null;
+    }
+
+    return findNestedCodeBlock(pre);
+  }
+
   // Load ESM in content script.
   // See https://stackoverflow.com/a/53033388
   const turndownModule = await import(turndownJsURL);
@@ -64,36 +206,15 @@ export async function selectionToMarkdown(
     value.setAttribute('src', value.src);
   });
 
-  // Normalize wrapped PRE blocks into canonical <pre><code>...</code></pre>.
-  // This keeps matching conservative and delegates markdown rendering details
-  // (fenced vs indented, language handling, fence sizing) to Turndown built-ins.
+  // Normalize recognizable PRE-based code blocks into canonical
+  // <pre><code>...</code></pre> before Turndown runs.
   container.querySelectorAll('pre').forEach((pre) => {
-    if (pre.firstElementChild?.nodeName === 'CODE') {
+    const codeBlock = getNormalizedCodeBlock(pre);
+    if (!codeBlock) {
       return;
     }
 
-    const codeNodes = pre.querySelectorAll('code');
-    if (codeNodes.length !== 1) {
-      return;
-    }
-
-    const codeNode = codeNodes[0]!;
-    const className = codeNode.getAttribute('class') || '';
-    const hasLanguageClass = /\blanguage-\S+\b/.test(className);
-    const codeText = codeNode.textContent || '';
-    const hasMultilineCode = codeText.includes('\n');
-
-    // Conservative matcher: avoid rewriting instructional <pre> content.
-    if (!hasLanguageClass && !hasMultilineCode) {
-      return;
-    }
-
-    const normalizedCode = document.createElement('code');
-    if (className) {
-      normalizedCode.setAttribute('class', className);
-    }
-    normalizedCode.textContent = codeText;
-    pre.replaceChildren(normalizedCode);
+    pre.replaceChildren(createNormalizedCodeElement(codeBlock));
   });
   const html = container.innerHTML;
   return turndownService.turndown(html);
