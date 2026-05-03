@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createContextMenuHandler } from '../../src/handlers/context-menu-handler.js';
 import type { LinkExportService } from '../../src/services/link-export-service.js';
+import type { TabsAPI } from '../../src/services/shared-types.js';
 import type { TabExportService } from '../../src/services/tab-export-service.js';
 import type { SelectionConverterService } from '../../src/services/selection-converter-service.js';
 
@@ -35,10 +36,17 @@ function createServices(overrides?: Partial<Services>): Services {
   } as Services;
 }
 
+function createTabsAPI(resultTab = createMockTab()): TabsAPI {
+  return {
+    query: vi.fn(async () => [resultTab]),
+  };
+}
+
 describe('contextMenuHandler', () => {
   it('exports current tab link', async () => {
     const exportLinkMock = vi.fn(async () => 'link');
     const handler = createContextMenuHandler(
+      createTabsAPI(),
       createServices({ linkExportService: { exportLink: exportLinkMock } }),
       () => ({ getSubTree: vi.fn() }),
       { toMarkdown: vi.fn() },
@@ -56,6 +64,7 @@ describe('contextMenuHandler', () => {
   it('exports selection as markdown', async () => {
     const convertMock = vi.fn(async () => 'md');
     const handler = createContextMenuHandler(
+      createTabsAPI(),
       createServices({ selectionConverterService: { convertSelectionToMarkdown: convertMock } }),
       () => ({ getSubTree: vi.fn() }),
       { toMarkdown: vi.fn() },
@@ -67,9 +76,30 @@ describe('contextMenuHandler', () => {
     expect(convertMock).toHaveBeenCalledWith(tab);
   });
 
+  it('exports selection as markdown when the browser omits the tab argument', async () => {
+    const convertMock = vi.fn(async () => 'md');
+    const recoveredTab = createMockTab({ id: 7, title: 'Recovered' });
+    const tabsAPI = createTabsAPI(recoveredTab);
+    const handler = createContextMenuHandler(
+      tabsAPI,
+      createServices({ selectionConverterService: { convertSelectionToMarkdown: convertMock } }),
+      () => ({ getSubTree: vi.fn() }),
+      { toMarkdown: vi.fn() },
+    );
+
+    const result = await handler.handleMenuClick({ menuItemId: 'selection-as-markdown' } as any);
+    expect(result).toBe('md');
+    expect(tabsAPI.query).toHaveBeenCalledWith({
+      currentWindow: true,
+      active: true,
+    });
+    expect(convertMock).toHaveBeenCalledWith(recoveredTab);
+  });
+
   it('exports highlighted tabs list', async () => {
     const exportTabsMock = vi.fn(async () => 'tabs');
     const handler = createContextMenuHandler(
+      createTabsAPI(),
       createServices({ tabExportService: { exportTabs: exportTabsMock } }),
       () => ({ getSubTree: vi.fn() }),
       { toMarkdown: vi.fn() },
@@ -95,6 +125,7 @@ describe('contextMenuHandler', () => {
     const getSubTreeMock = vi.fn().mockResolvedValue([bookmarkNode]);
     const toMarkdownMock = vi.fn(() => 'bookmark-md');
     const handler = createContextMenuHandler(
+      createTabsAPI(),
       createServices(),
       () => ({ getSubTree: getSubTreeMock }),
       { toMarkdown: toMarkdownMock },
@@ -109,6 +140,7 @@ describe('contextMenuHandler', () => {
   it('parses custom format for current tab', async () => {
     const exportLinkMock = vi.fn(async () => 'custom');
     const handler = createContextMenuHandler(
+      createTabsAPI(),
       createServices({ linkExportService: { exportLink: exportLinkMock } }),
       () => ({ getSubTree: vi.fn() }),
       { toMarkdown: vi.fn() },

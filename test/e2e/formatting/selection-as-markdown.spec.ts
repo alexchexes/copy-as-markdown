@@ -122,6 +122,25 @@ test.describe('Selection as Markdown', () => {
     expect(clipboardText).toBe(expectedMarkdown);
   });
 
+  test('should copy selection via context menu when the browser omits the tab argument', async ({ page, serviceWorker }) => {
+    await page.evaluate(() => {
+      const range = document.createRange();
+      const body = document.querySelector('body');
+      if (body) {
+        range.selectNodeContents(body);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+    });
+
+    await triggerContextMenu(serviceWorker, 'selection-as-markdown', {}, {}, { omitTab: true });
+
+    const clipboardText = (await waitForMockClipboard(serviceWorker, 3000)).text;
+    const expectedMarkdown = await readFile(join(__dirname, '../../../fixtures/selection.md'), 'utf-8');
+    expect(clipboardText).toBe(expectedMarkdown);
+  });
+
   test.describe('Code Block Style Setting', () => {
     test('should use fenced code block by default', async ({ page, context, extensionId }) => {
       await resetSettingsToDefault(context, extensionId);

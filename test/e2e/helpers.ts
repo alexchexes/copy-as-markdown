@@ -65,8 +65,9 @@ export async function triggerContextMenu(
   menuItemId: string,
   info: Partial<browser.contextMenus.OnClickData> = {},
   tabOverrides: Partial<browser.tabs.Tab> = {},
+  options?: { omitTab?: boolean },
 ): Promise<void> {
-  await serviceWorker.evaluate(async ({ menuItemId, info, tabOverrides }) => {
+  await serviceWorker.evaluate(async ({ menuItemId, info, tabOverrides, omitTab }) => {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!activeTab) {
       throw new Error('No active tab found');
@@ -80,8 +81,12 @@ export async function triggerContextMenu(
     };
 
     // @ts-expect-error - dispatch exists in Chrome extension context
-    chrome.contextMenus.onClicked.dispatch(clickInfo, targetTab);
-  }, { menuItemId, info, tabOverrides });
+    if (omitTab) {
+      chrome.contextMenus.onClicked.dispatch(clickInfo);
+    } else {
+      chrome.contextMenus.onClicked.dispatch(clickInfo, targetTab);
+    }
+  }, { menuItemId, info, tabOverrides, omitTab: options?.omitTab === true });
 }
 
 /**

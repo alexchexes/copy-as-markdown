@@ -8,7 +8,8 @@ import Markdown from '../lib/markdown.js';
 import type { LinkExportService } from '../services/link-export-service.js';
 import type { TabExportService } from '../services/tab-export-service.js';
 import type { SelectionConverterService } from '../services/selection-converter-service.js';
-import { parseCustomFormatCommand, requireWindowId } from '../services/browser-utils.js';
+import type { TabsAPI } from '../services/shared-types.js';
+import { mustGetCurrentTab, parseCustomFormatCommand, requireWindowId } from '../services/browser-utils.js';
 
 export interface BookmarksAPI {
   getSubTree: (id: string) => Promise<browser.bookmarks.BookmarkTreeNode[]>;
@@ -67,6 +68,7 @@ function isTabListMenuId(id: ContextMenuId): id is TabListMenuId {
 }
 
 export function createContextMenuHandler(
+  tabsAPI: TabsAPI,
   services: {
     linkExportService: LinkExportService;
     tabExportService: TabExportService;
@@ -80,16 +82,17 @@ export function createContextMenuHandler(
     tab?: browser.tabs.Tab,
   ): Promise<string> {
     const menuItemId = info.menuItemId.toString() as ContextMenuId;
+    async function requireCurrentTab(): Promise<browser.tabs.Tab> {
+      return await mustGetCurrentTab(tabsAPI, tab);
+    }
 
     // Handle special menu items
     if (menuItemId === ContextMenuIds.CurrentTab) {
-      if (!tab) {
-        throw new Error('tab is required for current-tab menu item');
-      }
+      const currentTab = await requireCurrentTab();
       return services.linkExportService.exportLink({
         format: 'link',
-        title: tab.title || '',
-        url: tab.url || '',
+        title: currentTab.title || '',
+        url: currentTab.url || '',
       });
     }
 
@@ -118,18 +121,12 @@ export function createContextMenuHandler(
     }
 
     if (menuItemId === ContextMenuIds.SelectionAsMarkdown) {
-      if (!tab) {
-        throw new Error('tab is required for selection-as-markdown menu item');
-      }
-      return services.selectionConverterService.convertSelectionToMarkdown(tab);
+      return services.selectionConverterService.convertSelectionToMarkdown(await requireCurrentTab());
     }
 
     // Check if menu item is in the tab list lookup table (Firefox only)
     if (isTabListMenuId(menuItemId)) {
-      if (!tab) {
-        throw new Error('tab is required for tab list menu item');
-      }
-      const windowId = requireWindowId(tab);
+      const windowId = requireWindowId(await requireCurrentTab());
       const params = TAB_LIST_MENU_ITEMS[menuItemId]!;
       return services.tabExportService.exportTabs({
         scope: params.scope,
@@ -161,14 +158,12 @@ export function createContextMenuHandler(
 
       switch (context) {
         case 'current-tab': {
-          if (!tab) {
-            throw new Error('tab is required for current-tab custom format');
-          }
+          const currentTab = await requireCurrentTab();
           return services.linkExportService.exportLink({
             format: 'custom-format',
             customFormatSlot: slot,
-            title: tab.title || '',
-            url: tab.url || '',
+            title: currentTab.title || '',
+            url: currentTab.url || '',
           });
         }
 
@@ -186,10 +181,7 @@ export function createContextMenuHandler(
         }
 
         case 'all-tabs': {
-          if (!tab) {
-            throw new Error('tab is required for all-tabs custom format');
-          }
-          const windowId = requireWindowId(tab);
+          const windowId = requireWindowId(await requireCurrentTab());
           return services.tabExportService.exportTabs({
             scope: 'all',
             format: 'custom-format',
@@ -199,10 +191,7 @@ export function createContextMenuHandler(
         }
 
         case 'highlighted-tabs': {
-          if (!tab) {
-            throw new Error('tab is required for highlighted-tabs custom format');
-          }
-          const windowId = requireWindowId(tab);
+          const windowId = requireWindowId(await requireCurrentTab());
           return services.tabExportService.exportTabs({
             scope: 'highlighted',
             format: 'custom-format',
@@ -237,6 +226,7 @@ export function createBrowserContextMenuHandler(
   bookmarksFormatter: BookmarksFormatter,
 ): ContextMenuHandler {
   return createContextMenuHandler(
+    browser.tabs,
     services,
     () => browser.bookmarks,
     bookmarksFormatter,
